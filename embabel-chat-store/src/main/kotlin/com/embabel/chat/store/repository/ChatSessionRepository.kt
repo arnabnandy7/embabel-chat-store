@@ -16,6 +16,7 @@
 package com.embabel.chat.store.repository
 
 import com.embabel.chat.store.model.AttachmentData
+import com.embabel.chat.store.model.AssetData
 import com.embabel.chat.store.model.MessageData
 import com.embabel.chat.store.model.SessionSummary
 import com.embabel.chat.store.model.SimpleStoredMessage
@@ -98,6 +99,35 @@ interface ChatSessionRepository {
         messageAuthor: StoredUser? = null,
         messageRecipient: StoredUser? = null
     ): StoredSession
+
+    /**
+     * Create a new session with an initial message and its durable asset metadata.
+     *
+     * The default preserves compatibility for repository implementations that do not
+     * support assets. Such implementations can still use this method with an empty list.
+     *
+     * @throws IllegalArgumentException when assets are supplied to an implementation
+     * that has not added durable asset support
+     */
+    fun createSessionWithMessageAndAssets(
+        sessionId: String,
+        owner: StoredUser,
+        title: String? = null,
+        messageData: MessageData,
+        messageAuthor: StoredUser? = null,
+        messageRecipient: StoredUser? = null,
+        assets: List<AssetData>,
+    ): StoredSession {
+        require(assets.isEmpty()) { "This chat session repository does not support durable assets" }
+        return createSessionWithMessage(
+            sessionId = sessionId,
+            owner = owner,
+            title = title,
+            messageData = messageData,
+            messageAuthor = messageAuthor,
+            messageRecipient = messageRecipient,
+        )
+    }
 
     /**
      * Find a session by its ID.
@@ -196,6 +226,35 @@ interface ChatSessionRepository {
         recipient: StoredUser? = null,
         attachments: List<AttachmentData> = emptyList()
     ): StoredSession
+
+    /**
+     * Add a message and its durable asset metadata to a session.
+     *
+     * This is separate from [addMessage] to preserve the existing message and attachment
+     * write path for callers that do not produce assets.
+     * The default delegates to [addMessage] for an empty asset list and rejects non-empty
+     * lists unless the implementation supports durable assets.
+     *
+     * @throws IllegalArgumentException when assets are supplied to an implementation
+     * that has not added durable asset support
+     */
+    fun addMessageWithAssets(
+        sessionId: String,
+        messageData: MessageData,
+        author: StoredUser? = null,
+        recipient: StoredUser? = null,
+        attachments: List<AttachmentData> = emptyList(),
+        assets: List<AssetData>,
+    ): StoredSession {
+        require(assets.isEmpty()) { "This chat session repository does not support durable assets" }
+        return addMessage(
+            sessionId = sessionId,
+            messageData = messageData,
+            author = author,
+            recipient = recipient,
+            attachments = attachments,
+        )
+    }
 
     /**
      * Get all messages in a session.

@@ -153,6 +153,7 @@ open class ChatStoreAutoConfiguration {
         UniquenessConstraintSpec(label = "StoredMessage", property = "messageId"),
         UniquenessConstraintSpec(label = "User", property = "id"),
         UniquenessConstraintSpec(label = "Attachment", property = "attachmentId"),
+        UniquenessConstraintSpec(label = "StoredAsset", property = "storedAssetId"),
         RangeIndexSpec(label = "ChatSession", property = "lastActivityAt"),
     ).named(CONSTRAINT_SCHEMA_OWNER)
 
