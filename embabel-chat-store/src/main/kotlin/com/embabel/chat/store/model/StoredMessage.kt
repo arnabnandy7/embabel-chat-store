@@ -130,8 +130,15 @@ data class MessageData(
      * Convert to a rich agent-api [Message] type.
      */
     @JvmOverloads
-    fun toMessage(assets: List<DurableAsset> = emptyList()): Message = when (role) {
-        MessageRole.USER -> UserMessage(content = content, timestamp = createdAt)
+    fun toMessage(
+        assets: List<DurableAsset> = emptyList(),
+        contentParts: List<ContentPartData> = emptyList(),
+    ): Message = when (role) {
+        MessageRole.USER -> if (contentParts.isEmpty()) {
+            UserMessage(content = content, timestamp = createdAt)
+        } else {
+            UserMessage(parts = contentParts.sortedBy { it.position }.map { it.toContentPart() }, timestamp = createdAt)
+        }
         MessageRole.ASSISTANT -> AssistantMessage(content = content, assets = assets, timestamp = createdAt)
         MessageRole.SYSTEM -> SystemMessage(content = content, timestamp = createdAt)
     }
@@ -187,6 +194,10 @@ data class SimpleStoredMessage(
     /** Durable assets produced with this assistant message. */
     @GraphRelationship(type = "HAS_ASSET", direction = Direction.OUTGOING)
     val assets: List<AssetData> = emptyList(),
+
+    /** Ordered structured content for multimodal user messages. */
+    @GraphRelationship(type = "HAS_CONTENT_PART", direction = Direction.OUTGOING)
+    val contentParts: List<ContentPartData> = emptyList(),
 ) : Message {
     // Convenience accessors for common properties
     val messageId: String get() = message.messageId
@@ -202,7 +213,7 @@ data class SimpleStoredMessage(
     /**
      * Convert to a rich agent-api [Message] type.
      */
-    fun toMessage(): Message = message.toMessage(assets.map { it.toAsset() })
+    fun toMessage(): Message = message.toMessage(assets.map { it.toAsset() }, contentParts)
 }
 
 /**
@@ -230,6 +241,10 @@ data class AttributedMessage(
     /** Durable assets produced with this assistant message. */
     @GraphRelationship(type = "HAS_ASSET", direction = Direction.OUTGOING)
     val assets: List<AssetData> = emptyList(),
+
+    /** Ordered structured content for multimodal user messages. */
+    @GraphRelationship(type = "HAS_CONTENT_PART", direction = Direction.OUTGOING)
+    val contentParts: List<ContentPartData> = emptyList(),
 )
 
 /**
