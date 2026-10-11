@@ -16,8 +16,8 @@
 package com.embabel.chat.store.adapter
 
 import com.embabel.agent.api.identity.User
-import com.embabel.chat.AssistantMessage
 import com.embabel.chat.AssetTracker
+import com.embabel.chat.AssetView
 import com.embabel.chat.Conversation
 import com.embabel.chat.DurableAsset
 import com.embabel.chat.UserMessage
@@ -288,8 +288,8 @@ class StoredConversation(
         inReplyTo: String? = null,
     ): String {
         val messageData = MessageData.from(message, messageId = UUIDv7.generateString()).copy(inReplyTo = inReplyTo)
-        // Only AssistantMessage exposes assets; other message roles have none to persist.
-        val messageAssets = (message as? AssistantMessage)?.assets.orEmpty()
+        // User and assistant messages can both carry assets through AssetView.
+        val messageAssets = (message as? AssetView)?.assets.orEmpty()
         val durableAssets = messageAssets.filterIsInstance<DurableAsset>().map {
             AssetData.from(it, messageData.messageId)
         }

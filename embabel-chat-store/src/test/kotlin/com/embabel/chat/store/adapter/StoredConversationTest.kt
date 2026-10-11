@@ -346,6 +346,7 @@ class StoredConversationTest {
     @Test
     fun `multimodal user message parts are persisted with the message`() {
         val persistenceLatch = CountDownLatch(1)
+        val assetsCaptor = argumentCaptor<List<AssetData>>()
         whenever(repository.addMessageWithContentParts(eq(sessionId), any(), any(), any(), any(), any(), any()))
             .thenAnswer {
                 val messageData = it.getArgument<MessageData>(1)
@@ -358,11 +359,20 @@ class StoredConversationTest {
                 )
             }
         whenever(repository.getMessages(sessionId)).thenReturn(emptyList())
+        val asset = DurableAsset(
+            id = "asset-1",
+            name = "photo.png",
+            mimeType = "image/png",
+            sizeBytes = 3,
+            contentHash = "abc123",
+            storageUri = "asset://uploads/asset-1",
+        )
         val message = UserMessage(
             parts = listOf(
                 TextPart("What is in this image?"),
                 ImagePart("image/png", byteArrayOf(1, 2, 3)),
             ),
+            assets = listOf(asset),
         )
         val conversation = createConversation()
 
@@ -372,8 +382,9 @@ class StoredConversationTest {
         assertTrue(persistenceLatch.await(5, TimeUnit.SECONDS))
         val partsCaptor = argumentCaptor<List<ContentPartData>>()
         verify(repository, timeout(5000)).addMessageWithContentParts(
-            eq(sessionId), any(), any(), any(), any(), any(), partsCaptor.capture(),
+            eq(sessionId), any(), any(), any(), any(), assetsCaptor.capture(), partsCaptor.capture(),
         )
+        assertEquals(asset.id, assetsCaptor.firstValue.single().assetId)
         assertEquals(message.parts, partsCaptor.firstValue.map { it.toContentPart() })
     }
 

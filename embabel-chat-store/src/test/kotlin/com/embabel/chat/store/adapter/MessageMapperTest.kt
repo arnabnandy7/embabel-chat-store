@@ -129,6 +129,33 @@ class MessageDataConversionTest {
     }
 
     @Test
+    fun `SimpleStoredMessage restores durable user assets`() {
+        val asset = AssetData(
+            storedAssetId = "msg-1:asset-1",
+            assetId = "asset-1",
+            name = "photo.png",
+            mimeType = "image/png",
+            sizeBytes = 3,
+            contentHash = "abc123",
+            storageUri = "asset://uploads/asset-1",
+            createdAt = Instant.parse("2026-10-11T00:00:00Z"),
+        )
+        val stored = SimpleStoredMessage(
+            message = MessageData(
+                messageId = "msg-1",
+                role = MessageRole.USER,
+                content = "What is in this image?",
+                createdAt = Instant.now(),
+            ),
+            assets = listOf(asset),
+        )
+
+        val restored = stored.toMessage() as UserMessage
+
+        assertEquals(listOf(asset.toAsset()), restored.assets)
+    }
+
+    @Test
     fun `MessageData from UserMessage converts correctly`() {
         val timestamp = Instant.now()
         val message = UserMessage(

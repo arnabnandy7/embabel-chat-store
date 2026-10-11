@@ -135,9 +135,13 @@ data class MessageData(
         contentParts: List<ContentPartData> = emptyList(),
     ): Message = when (role) {
         MessageRole.USER -> if (contentParts.isEmpty()) {
-            UserMessage(content = content, timestamp = createdAt)
+            UserMessage(content = content, assets = assets, timestamp = createdAt)
         } else {
-            UserMessage(parts = contentParts.sortedBy { it.position }.map { it.toContentPart() }, timestamp = createdAt)
+            UserMessage(
+                parts = contentParts.sortedBy { it.position }.map { it.toContentPart() },
+                assets = assets,
+                timestamp = createdAt,
+            )
         }
         MessageRole.ASSISTANT -> AssistantMessage(content = content, assets = assets, timestamp = createdAt)
         MessageRole.SYSTEM -> SystemMessage(content = content, timestamp = createdAt)
@@ -191,7 +195,7 @@ data class SimpleStoredMessage(
     @GraphRelationship(type = "HAS_ATTACHMENT", direction = Direction.OUTGOING)
     val attachments: List<AttachmentData> = emptyList(),
 
-    /** Durable assets produced with this assistant message. */
+    /** Durable assets associated with this message. */
     @GraphRelationship(type = "HAS_ASSET", direction = Direction.OUTGOING)
     val assets: List<AssetData> = emptyList(),
 
@@ -238,7 +242,7 @@ data class AttributedMessage(
     @GraphRelationship(type = "HAS_ATTACHMENT", direction = Direction.OUTGOING)
     val attachments: List<AttachmentData> = emptyList(),
 
-    /** Durable assets produced with this assistant message. */
+    /** Durable assets associated with this message. */
     @GraphRelationship(type = "HAS_ASSET", direction = Direction.OUTGOING)
     val assets: List<AssetData> = emptyList(),
 

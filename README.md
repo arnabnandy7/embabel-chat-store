@@ -160,9 +160,9 @@ vector index are Drivine `SchemaCatalog`s, and Drivine's schema manager creates 
 own form at startup. A load or a save is one statement and one round trip however many relationships it
 carries.
 
-## Durable Assistant Assets
+## Durable Message Assets
 
-`StoredConversation` persists `DurableAsset` metadata carried by an `AssistantMessage` and
+`StoredConversation` persists `DurableAsset` metadata carried by user and assistant messages and
 restores those assets when the conversation is loaded again:
 
 ```kotlin
@@ -173,14 +173,25 @@ val message = AssistantMessage(
 conversation.addMessage(message)
 ```
 
+Inbound user assets use the same path:
+
+```kotlin
+val message = UserMessage(
+    content = "Please summarize this report",
+    assets = listOf(durableAsset),
+)
+conversation.addMessage(message)
+```
+
 Asset metadata is stored in `StoredAsset` nodes connected to the message through `HAS_ASSET`.
 The content bytes are not stored in the graph. `storageUri` remains an opaque reference resolved
 by the `AssetStore` that originally materialized the asset.
 
-Only `DurableAsset` instances are persisted. Ephemeral or application-specific `Asset`
+Only `DurableAsset` instances are persisted. `MaterializableAsset` and other ephemeral `Asset`
 implementations remain available while the message is pending in memory but cannot be restored
-after a reload. Applications should materialize temporary assets before adding the assistant
-message to a stored conversation.
+after a reload. Applications should materialize them through an `AssetStore` before adding the
+message to a stored conversation. `MediaPart.asMaterializableAsset(...)` bridges inline image and
+document parts to that external-storage flow.
 
 Deleting a session deletes its `StoredAsset` metadata nodes. It does not delete externally stored
 content; retention and content deletion remain the responsibility of the corresponding `AssetStore`.
@@ -202,9 +213,10 @@ conversation.addMessage(message)
 ```
 
 Inline storage is required because agent-api content parts carry bytes rather than durable storage
-references. For large files that are already stored externally, use `AttachmentData` so the graph
-contains only metadata and an opaque `storageUri`. Existing text-only message nodes remain readable;
-when no `HAS_CONTENT_PART` relationships exist, the stored `content` property is used as before.
+references. For larger files, materialize the corresponding asset through an `AssetStore` and attach
+the resulting `DurableAsset` to the `UserMessage`; the graph then stores only metadata and an opaque
+`storageUri`. Existing text-only message nodes remain readable; when no `HAS_CONTENT_PART`
+relationships exist, the stored `content` property is used as before.
 
 ## Message Events
 
