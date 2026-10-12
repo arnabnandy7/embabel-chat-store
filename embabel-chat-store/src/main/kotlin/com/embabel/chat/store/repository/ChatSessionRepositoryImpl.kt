@@ -37,10 +37,12 @@ import com.embabel.chat.store.model.deleteAll
 import com.embabel.chat.store.model.loadAll
 import com.embabel.chat.store.model.owner
 import org.drivine.manager.CascadeType
-import org.drivine.manager.GraphObjectManager
 import org.drivine.manager.PersistenceManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.delete
 import org.drivine.manager.load
+import org.drivine.manager.update
+import org.drivine.model.Stamps
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.VectorIndexSpec
 import org.drivine.query.QuerySpecification
@@ -63,11 +65,17 @@ private fun registerOrder(order: OrderSpec) {
 /**
  * Drivine-based implementation of ChatSessionRepository.
  *
- * Uses GraphObjectManager with reified type extensions and generated query DSL
+ * Uses StatelessGraphObjectManager with reified type extensions and generated query DSL
  * for type-safe graph operations.
+ *
+ * [SessionData] and [MessageData] carry a `@NodeStamp`, so a save of a loaded session or message
+ * is refused with `StaleObjectException` when the node's properties changed after the load. Every
+ * Cypher statement here that sets a property of one of those nodes therefore also sets
+ * `Stamps.setClause`: without it a checked save would not notice the write, and would overwrite it.
+ * Cypher added to this class must do the same.
  */
 open class ChatSessionRepositoryImpl(
-    private val graphObjectManager: GraphObjectManager,
+    private val graphObjectManager: StatelessGraphObjectManager,
     private val persistenceManager: PersistenceManager,
     private val eventPublisher: ApplicationEventPublisher? = null,
     private val clock: Clock = Clock.systemUTC(),
@@ -368,15 +376,15 @@ open class ChatSessionRepositoryImpl(
         }
     }
 
+    /**
+     * Updates the session node alone, and not the [StoredSession] view: a title change has no use
+     * for the session's messages, and loading the view would fetch every one of them with its
+     * embedding vector.
+     */
     @Transactional
     override fun updateSessionTitle(sessionId: String, title: String) {
-        val session = findBySessionId(sessionId).orElseThrow {
-            IllegalArgumentException("Session not found: $sessionId")
-        }
-        val updated = session.copy(
-            session = session.session.copy(title = title)
-        )
-        graphObjectManager.save(updated)
+        graphObjectManager.update<SessionData>(sessionId) { it.copy(title = title) }
+            ?: throw IllegalArgumentException("Session not found: $sessionId")
     }
 
     @Transactional
@@ -452,7 +460,7 @@ open class ChatSessionRepositoryImpl(
                 assets = assets,
             )
         )
-        graphObjectManager.save(newMessage, CascadeType.PRESERVE)
+        graphObjectManager.save(newMessage)
 
         return findBySessionId(sessionId).orElseThrow {
             IllegalStateException("Session not found after adding message: $sessionId")
@@ -480,7 +488,7 @@ open class ChatSessionRepositoryImpl(
                     """
                     MATCH (:ChatSession {sessionId: ${'$'}sessionId})
                           -[:HAS_MESSAGE]->(message:StoredMessage {messageId: ${'$'}messageId})
-                    SET message.narration = ${'$'}narration
+                    SET message.narration = ${'$'}narration, ${Stamps.setClause("message")}
                     RETURN count(message) AS updated
                     """.trimIndent()
                 )
@@ -515,10 +523,13 @@ open class ChatSessionRepositoryImpl(
             logger.debug("No un-narrated assistant message found in session {}", conversationId)
             return
         }
-        val updated = latestAssistant.copy(
-            message = latestAssistant.message.copy(narration = narration)
+        // The message node alone, and of it the narration alone: the author, the recipient and the
+        // attachments are not written. The message carries the stamp it was loaded with, so the
+        // save is checked.
+        graphObjectManager.save(
+            latestAssistant.message.copy(narration = narration),
+            only = setOf(MessageData::narration),
         )
-        graphObjectManager.save(updated)
         logger.debug("Updated narration for message {} in session {}", latestAssistant.messageId, conversationId)
     }
 
@@ -541,7 +552,8 @@ open class ChatSessionRepositoryImpl(
                 MATCH (session:ChatSession {sessionId: ${'$'}sessionId})
                 SET session.lastActivityAt = CASE
                     WHEN session.lastActivityAt IS NULL OR session.lastActivityAt < ${'$'}activityAt
-                    THEN ${'$'}activityAt ELSE session.lastActivityAt END
+                    THEN ${'$'}activityAt ELSE session.lastActivityAt END,
+                    ${Stamps.setClause("session")}
                 RETURN count(session) AS found
                 """.trimIndent()
             )
