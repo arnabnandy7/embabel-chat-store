@@ -55,6 +55,7 @@ import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.context.ApplicationEventPublisher
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -107,6 +108,38 @@ class StoredConversationTest {
         )
         whenever(repository.addMessage(eq(sessionId), any(), any(), any(), any())).thenReturn(session)
         return session
+    }
+
+    // ==================== Reply ownership ====================
+
+    @Test
+    fun `a reply records the message it answers, while pending and once persisted`() {
+        val release = CountDownLatch(1)
+        val bothPersisted = CountDownLatch(2)
+        val persisted = CopyOnWriteArrayList<SimpleStoredMessage>()
+        whenever(repository.addMessage(eq(sessionId), any(), any(), any(), any())).thenAnswer { call ->
+            release.await(5, TimeUnit.SECONDS)
+            persisted += SimpleStoredMessage(call.getArgument<MessageData>(1))
+            bothPersisted.countDown()
+            StoredSession(
+                session = SessionData(sessionId = sessionId, title = "Test", createdAt = Instant.now()),
+                owner = user,
+                messages = persisted.toList(),
+            )
+        }
+        whenever(repository.getMessages(sessionId)).thenAnswer { persisted.toList() }
+        val conversation = createConversation(title = "Test")
+
+        val question = conversation.addMessageWithId(UserMessage(content = "Q"))
+        val reply = conversation.addMessageWithId(AssistantMessage(content = "A"), inReplyTo = question)
+
+        val pending = conversation.entries
+        assertEquals(mapOf(question to null, reply to question), pending.associate { it.messageId to it.inReplyTo })
+        assertEquals(listOf("Q", "A"), pending.map { it.message.content })
+
+        release.countDown()
+        assertTrue(bothPersisted.await(5, TimeUnit.SECONDS))
+        assertEquals(mapOf(question to null, reply to question), conversation.entries.associate { it.messageId to it.inReplyTo })
     }
 
     // ==================== Pending buffer tests ====================

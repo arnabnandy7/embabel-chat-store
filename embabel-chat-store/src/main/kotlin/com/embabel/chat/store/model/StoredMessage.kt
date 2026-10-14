@@ -98,6 +98,16 @@ data class MessageData(
      * after the load. Treat it as opaque, and leave it null for a new message.
      */
     @NodeStamp val stamp: String? = null,
+
+    /**
+     * The [messageId] of the message this one answers, or `null` when the writer did not say.
+     * Lets a reader pair a reply with its question by identity rather than by position, which
+     * matters whenever replies to different questions can interleave (a late background result,
+     * a concurrent session writing to the same conversation). Absent on messages written before
+     * the property existed, which read back as `null`. The store does not check the link: it
+     * need not name a message that exists, nor one in the same session.
+     */
+    val inReplyTo: String? = null,
 ) {
     companion object {
         /**
@@ -187,6 +197,7 @@ data class SimpleStoredMessage(
     val narration: String? get() = message.narration
     val embedding: FloatArray? get() = message.embedding
     val embeddingModel: String? get() = message.embeddingModel
+    val inReplyTo: String? get() = message.inReplyTo
 
     /**
      * Convert to a rich agent-api [Message] type.
