@@ -61,6 +61,17 @@ class MessageDataConversionTest {
     }
 
     @Test
+    fun `inline binary content rejects data larger than one MiB`() {
+        val oversizedData = ByteArray(ContentPartData.MAX_INLINE_BINARY_BYTES + 1)
+
+        val exception = assertThrows(IllegalArgumentException::class.java) {
+            ContentPartData.from(ImagePart("image/png", oversizedData), "msg-1", 0)
+        }
+
+        assertTrue(exception.message!!.contains("Materialize larger content through an AssetStore"))
+    }
+
+    @Test
     fun `stored message restores multimodal user content parts`() {
         val parts = listOf(
             ContentPartData.from(TextPart("Look at this"), "msg-1", 0),

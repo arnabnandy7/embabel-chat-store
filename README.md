@@ -213,9 +213,10 @@ conversation.addMessage(message)
 ```
 
 Inline storage is required because agent-api content parts carry bytes rather than durable storage
-references. For larger files, materialize the corresponding asset through an `AssetStore` and attach
-the resulting `DurableAsset` to the `UserMessage`; the graph then stores only metadata and an opaque
-`storageUri`. Existing text-only message nodes remain readable; when no `HAS_CONTENT_PART`
+references. Inline image and document parts are limited to 1 MiB each. For larger files, materialize
+the corresponding asset through an `AssetStore` and attach the resulting `DurableAsset` to the
+`UserMessage`; the graph then stores only metadata and an opaque `storageUri`. Existing text-only
+message nodes remain readable; when no `HAS_CONTENT_PART`
 relationships exist, the stored `content` property is used as before.
 
 ## Message Events

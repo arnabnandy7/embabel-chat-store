@@ -27,8 +27,9 @@ import java.util.Base64
  * One ordered part of a multimodal user message.
  *
  * Binary content is stored inline because agent-api [ContentPart] values contain bytes rather
- * than a durable external reference. Callers that already externalize uploads should continue
- * to use [AttachmentData] instead.
+ * than a durable external reference. Inline binary parts are limited to [MAX_INLINE_BINARY_BYTES]
+ * bytes; larger content should be materialized through an AssetStore and represented by a
+ * DurableAsset instead.
  */
 @NodeFragment(labels = ["StoredContentPart"])
 data class ContentPartData(
@@ -63,7 +64,7 @@ data class ContentPartData(
                 position = position,
                 type = ContentPartType.IMAGE,
                 mimeType = part.mimeType,
-                dataBase64 = Base64.getEncoder().encodeToString(part.data),
+                dataBase64 = encodeData(part.data),
             )
 
             is DocumentPart -> ContentPartData(
@@ -71,9 +72,19 @@ data class ContentPartData(
                 position = position,
                 type = ContentPartType.DOCUMENT,
                 mimeType = part.mimeType,
-                dataBase64 = Base64.getEncoder().encodeToString(part.data),
+                dataBase64 = encodeData(part.data),
                 filename = part.filename,
             )
+        }
+
+        const val MAX_INLINE_BINARY_BYTES: Int = 1024 * 1024
+
+        private fun encodeData(data: ByteArray): String {
+            require(data.size <= MAX_INLINE_BINARY_BYTES) {
+                "Inline content part is ${data.size} bytes; maximum is $MAX_INLINE_BINARY_BYTES bytes. " +
+                    "Materialize larger content through an AssetStore and use a DurableAsset instead."
+            }
+            return Base64.getEncoder().encodeToString(data)
         }
     }
 
