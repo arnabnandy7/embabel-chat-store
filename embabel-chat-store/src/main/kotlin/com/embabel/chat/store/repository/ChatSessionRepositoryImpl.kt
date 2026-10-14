@@ -21,6 +21,7 @@ import com.embabel.chat.store.model.AssetData
 import com.embabel.chat.store.model.AttributedMessage
 import com.embabel.chat.store.model.DeletableSession
 import com.embabel.chat.store.model.MessageData
+import com.embabel.chat.store.model.MessageInSession
 import com.embabel.chat.store.model.NewMessageInSession
 import com.embabel.chat.store.model.SessionData
 import com.embabel.chat.store.model.SessionParticipants
@@ -35,19 +36,21 @@ import com.embabel.chat.store.model.StoredUser
 import com.embabel.chat.store.model.UserRef
 import com.embabel.chat.store.model.deleteAll
 import com.embabel.chat.store.model.loadAll
+import com.embabel.chat.store.model.message
 import com.embabel.chat.store.model.owner
+import com.embabel.chat.store.model.patch
+import com.embabel.chat.store.model.session
 import org.drivine.manager.CascadeType
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.delete
 import org.drivine.manager.load
 import org.drivine.manager.update
-import org.drivine.model.Stamps
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.VectorIndexSpec
-import org.drivine.query.QuerySpecification
 import org.drivine.query.dsl.OrderBuilder
 import org.drivine.query.dsl.OrderSpec
+import org.drivine.query.dsl.anyOf
 import org.drivine.query.dsl.query
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
@@ -69,10 +72,12 @@ private fun registerOrder(order: OrderSpec) {
  * for type-safe graph operations.
  *
  * [SessionData] and [MessageData] carry a `@NodeStamp`, so a save of a loaded session or message
- * is refused with `StaleObjectException` when the node's properties changed after the load. Every
- * Cypher statement here that sets a property of one of those nodes therefore also sets
- * `Stamps.setClause`: without it a checked save would not notice the write, and would overwrite it.
- * Cypher added to this class must do the same.
+ * is refused with `StaleObjectException` when the node's properties changed after the load.
+ *
+ * Every read and write of the graph here goes through the object manager, so that it runs on a
+ * store that does not speak Cypher, such as Oracle, as it does on one that does. A statement
+ * written by hand would be Cypher on one and SQL on the other, and would have to mark the stamp
+ * of each node it changes itself. [persistenceManager] is here for the vector index alone.
  */
 open class ChatSessionRepositoryImpl(
     private val graphObjectManager: StatelessGraphObjectManager,
@@ -165,7 +170,7 @@ open class ChatSessionRepositoryImpl(
     protected open fun rewriteMessageEmbeddings(
         modelName: String,
         embed: (List<String>) -> List<List<Double>>,
-    ): Int = MessageReembedRun(persistenceManager, modelName, embed, REEMBED_PAGE_SIZE).execute()
+    ): Int = MessageReembedRun(graphObjectManager, modelName, embed, REEMBED_PAGE_SIZE).execute()
 
     @Transactional
     override fun createSession(sessionId: String, owner: StoredUser, title: String?): StoredSession {
@@ -442,10 +447,9 @@ open class ChatSessionRepositoryImpl(
             messageData.messageId, sessionId, attachments.size, assets.size,
         )
 
-        // Verify the session exists and advance its activity in a single statement — MERGE on
-        // SessionRef would silently create a bare node. Folding the two saves a round trip on
-        // the hottest write path, and both are writes in this transaction, so a failure below
-        // rolls the timestamp back along with the message.
+        // Verify the session exists and advance its activity in one update — MERGE on SessionRef
+        // would silently create a bare node. Both are writes in this transaction, so a failure
+        // below rolls the timestamp back along with the message.
         if (!touchSession(sessionId, clock.instant())) {
             throw IllegalArgumentException("Session not found: $sessionId")
         }
@@ -482,20 +486,13 @@ open class ChatSessionRepositoryImpl(
 
     @Transactional
     override fun updateMessageNarration(sessionId: String, messageId: String, narration: String): Boolean {
-        val updated = persistenceManager.getOne(
-            QuerySpecification
-                .withStatement(
-                    """
-                    MATCH (:ChatSession {sessionId: ${'$'}sessionId})
-                          -[:HAS_MESSAGE]->(message:StoredMessage {messageId: ${'$'}messageId})
-                    SET message.narration = ${'$'}narration, ${Stamps.setClause("message")}
-                    RETURN count(message) AS updated
-                    """.trimIndent()
-                )
-                .bind(mapOf("sessionId" to sessionId, "messageId" to messageId, "narration" to narration))
-                .map { (it as Number).toLong() }
-        )
-        if (updated == 0L) {
+        // The message alone, and of it the narration alone, in one statement. A message of another
+        // session does not meet the predicate, and is not written.
+        val result = graphObjectManager.patch<MessageInSession>(messageId) {
+            fields { message.narration setTo narration }
+            where { session.sessionId eq sessionId }
+        }
+        if (!result.applied) {
             logger.warn("Cannot update narration: message {} not found in session {}", messageId, sessionId)
             return false
         }
@@ -544,22 +541,16 @@ open class ChatSessionRepositoryImpl(
      * The timestamp only ever moves forward, so clock skew between application instances can
      * leave the ordering slightly stale but can never move a session backwards — which would
      * otherwise let a keyset walk skip or repeat it.
+     *
+     * One statement, and the store compares: of two writers to one session, the later is compared
+     * with what the earlier left. A session from before `lastActivityAt` was stored has none, and
+     * is given this one.
      */
-    private fun touchSession(sessionId: String, activityAt: Instant): Boolean = persistenceManager.getOne(
-        QuerySpecification
-            .withStatement(
-                """
-                MATCH (session:ChatSession {sessionId: ${'$'}sessionId})
-                SET session.lastActivityAt = CASE
-                    WHEN session.lastActivityAt IS NULL OR session.lastActivityAt < ${'$'}activityAt
-                    THEN ${'$'}activityAt ELSE session.lastActivityAt END,
-                    ${Stamps.setClause("session")}
-                RETURN count(session) AS found
-                """.trimIndent()
-            )
-            .bind(mapOf("sessionId" to sessionId, "activityAt" to activityAt))
-            .map { (it as Number).toLong() }
-    ) > 0
+    private fun touchSession(sessionId: String, activityAt: Instant): Boolean =
+        graphObjectManager.patch<SessionData>(sessionId) {
+            fields { query.lastActivityAt setTo activityAt }
+            where { anyOf { query.lastActivityAt.isNull(); query.lastActivityAt lt activityAt } }
+        }.found
 
     private fun <T> loadSessionPage(
         page: SessionPageRequest,
@@ -575,17 +566,6 @@ open class ChatSessionRepositoryImpl(
         } else null
         return SessionPage(items, nextCursor)
     }
-
-    /** One row of the re-embed scan: the message to rewrite, and the text to rewrite it from. */
-    /**
-     * One page row, projected as a MAP and not as two columns.
-     *
-     * `transform(Class)` deserializes ONE value per row, so `RETURN a, b` hands Jackson the row as
-     * an array and it fails with "Cannot deserialize ... from Array value". A map literal is the
-     * shape it expects. The error surfaced only against a real database, which is why
-     * [ChatSessionReembedIntegrationTest] talks to one.
-     */
-    data class MessageText(val messageId: String, val content: String)
 
     private companion object {
         /**
