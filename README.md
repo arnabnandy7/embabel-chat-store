@@ -10,14 +10,15 @@ development and tests.
 | Database | Notes |
 |---|---|
 | **Neo4j** | The default for this repository's tests. The message vector index needs 5.13 or later. |
-| **FalkorDB** | [Guide](#see-it-running) runs on it. |
-| **Memgraph** | Guide runs on it. Use the `memgraph/memgraph-mage` image, which has the vector search module. |
+| **FalkorDB** | Fastest on most workloads in [graph-bench](https://github.com/liberation-data/graph-bench). |
+| **Memgraph** | Use the `memgraph/memgraph-mage` image, which has the vector search module. |
 | **Oracle** ![New](https://img.shields.io/badge/NEW-ff3e00?style=flat-square) | Oracle Database 23ai or later. No Cypher: Drivine reads with SQL/PGQ and writes rows. Needs the JDBC driver. See [Oracle](#oracle). |
 
 ## See it running
 
 [Guide](https://github.com/embabel/guide) is a working reference: an Embabel agent that answers
-questions about Embabel from its documentation, and keeps its conversations in this store.
+questions about Embabel from its documentation, and keeps its conversations in this store on any of
+the four databases.
 [Embabel Hub](https://hub.embabel.com) is its official front end.
 
 <p align="center">
@@ -89,8 +90,8 @@ from one to another is a configuration change.
 
 ### Oracle
 
-Oracle Database 23ai or later. Oracle does not speak Cypher, and the repository sends it none: it is
-the same class as on the other databases.
+Oracle Database 23ai or later. Oracle does not speak Cypher: Drivine reads it with
+SQL/PGQ and writes rows, and the repository is the same class as on the other databases.
 
 1. Add the JDBC driver. Drivine does not bring it:
 
