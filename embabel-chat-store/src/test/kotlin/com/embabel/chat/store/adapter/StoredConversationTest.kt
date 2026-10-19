@@ -346,9 +346,13 @@ class StoredConversationTest {
     @Test
     fun `multimodal user message parts are persisted with the message`() {
         val persistenceLatch = CountDownLatch(1)
+        // Persistence waits until the test has read the pending message: once it completes, the
+        // message leaves the pending buffer and the mocked repository returns no messages.
+        val pendingRead = CountDownLatch(1)
         val assetsCaptor = argumentCaptor<List<AssetData>>()
         whenever(repository.addMessageWithContentParts(eq(sessionId), any(), any(), any(), any(), any(), any()))
             .thenAnswer {
+                pendingRead.await(5, TimeUnit.SECONDS)
                 val messageData = it.getArgument<MessageData>(1)
                 val contentParts = it.getArgument<List<ContentPartData>>(6)
                 persistenceLatch.countDown()
@@ -379,6 +383,7 @@ class StoredConversationTest {
         conversation.addMessage(message)
 
         assertEquals(message.parts, (conversation.messages.single() as UserMessage).parts)
+        pendingRead.countDown()
         assertTrue(persistenceLatch.await(5, TimeUnit.SECONDS))
         val partsCaptor = argumentCaptor<List<ContentPartData>>()
         verify(repository, timeout(5000)).addMessageWithContentParts(
